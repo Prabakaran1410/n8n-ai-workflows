@@ -1,0 +1,13 @@
+.env
+node_modules/
+.n8n/
+__pycache__/
+*.pyc
+.venv/
+venv/
+# n8n writes credential exports here if you ever run export:credentials.
+# Nothing in this directory is safe to commit.
+credentials/
+*.credentials.json
+.n8n-test/
+package-lock.json

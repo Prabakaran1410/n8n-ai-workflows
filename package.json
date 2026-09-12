@@ -1,0 +1,13 @@
+{
+  "name": "n8n-ai-workflows",
+  "version": "1.0.0",
+  "description": "Two working n8n AI automations plus the shared error handler, retries and heartbeat that most of them are missing.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "check": "python scripts/check_workflows.py",
+    "mock": "python services/mock_extract.py",
+    "n8n": "npx n8n",
+    "import": "npx n8n import:workflow --separate --input=workflows"
+  }
+}

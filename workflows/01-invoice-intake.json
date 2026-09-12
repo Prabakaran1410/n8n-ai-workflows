@@ -1,0 +1,429 @@
+{
+  "name": "01 Invoice intake (unattended)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "has:attachment filename:pdf -label:processed"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Email arrives with an invoice",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        0
+      ],
+      "notes": "Gmail query does the first filter, so a newsletter never costs a model call."
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Test with a sample PDF",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        260
+      ],
+      "notes": "Lets the whole chain be run on demand without waiting for an email."
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8000/sample/review-me.pdf",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "attachment_0"
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Load sample PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        260
+      ],
+      "notes": "Fetched over HTTP, not read from disk: n8n sandboxes file access and n8n cloud has no disk, so a disk-read node fails for most people who import this. 127.0.0.1 rather than localhost on purpose \u2014 n8n resolves localhost to IPv6 ::1, and a service bound only to IPv4 then refuses the connection."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-pdf",
+              "leftValue": "={{ Object.values($binary ?? {}).filter(b => b.mimeType === 'application/pdf').length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Has a PDF attached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "notes": "A reply with no attachment is not a failure. It must not reach the error branch."
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Not an invoice, ignore",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.extract_url }}/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "attachment_0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Extract document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        -40
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Retries with backoff. LLM APIs return 429 under load; one retry recovers most of them."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-auto",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "auto",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "safe to post"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-review",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "needs a human"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Safe to post automatically?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        480,
+        -40
+      ],
+      "notes": "The service decides, not this node. n8n should not have to know what 0.85 means."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Invoices",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Vendor": "={{ $json.invoice.vendor_name.value }}",
+            "Invoice number": "={{ $json.invoice.invoice_number.value }}",
+            "Date": "={{ $json.invoice.invoice_date.value }}",
+            "Currency": "={{ $json.invoice.currency.value }}",
+            "Total": "={{ $json.invoice.total.value }}",
+            "Confidence": "={{ $json.min_confidence }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Append to the ledger",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        720,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the service response into something a finance person can act on.\n//\n// The temptation is to dump the JSON into Slack. Nobody reads that, so the alert\n// gets muted, and a muted alert is the same as no alert. So: the vendor, the\n// amount, and specifically which field is doubtful and what the model guessed.\n\nconst out = [];\n\nfor (const item of $input.all()) {\n  const d = item.json;\n  const inv = d.invoice ?? {};\n  const flags = d.review?.needs_human_review ?? [];\n  const checks = d.review?.validation_problems ?? [];\n\n  const lines = [\n    `*Invoice needs a look before it goes in the books*`,\n    `${inv.vendor_name?.value ?? 'Unknown vendor'} \u2014 ${inv.invoice_number?.value ?? 'no number'}`,\n    `Amount: ${inv.currency?.value ?? ''} ${inv.total?.value ?? '?'}`,\n    ``,\n  ];\n\n  if (checks.length) {\n    lines.push(`*The numbers do not add up:*`);\n    checks.forEach((c) => lines.push(`\u2022 ${c}`));\n    lines.push(``);\n  }\n\n  if (flags.length) {\n    lines.push(`*Read with low confidence:*`);\n    flags.forEach((f) => lines.push(`\u2022 ${f}`));\n    lines.push(``);\n  }\n\n  lines.push(`Nothing has been written to the sheet. Confirm and it goes in.`);\n\n  out.push({ json: { text: lines.join('\\n') } });\n}\n\nreturn out;"
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Write the review message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.slack_webhook_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000010",
+      "name": "Post to the review channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set0",
+              "name": "extract_url",
+              "value": "http://127.0.0.1:8000",
+              "type": "string"
+            },
+            {
+              "id": "set1",
+              "name": "slack_webhook_url",
+              "value": "https://hooks.slack.com/services/REPLACE_ME",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "includeBinary": true,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000011",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        60
+      ],
+      "notes": "Every URL the workflow uses, in one place a non-technical person can edit. Env vars are not used on purpose: n8n blocks $env in nodes by default and n8n cloud will not let you unblock it, so an $env expression fails on import."
+    }
+  ],
+  "connections": {
+    "Email arrives with an invoice": {
+      "main": [
+        [
+          {
+            "node": "Has a PDF attached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with a sample PDF": {
+      "main": [
+        [
+          {
+            "node": "Load sample PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load sample PDF": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has a PDF attached?": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not an invoice, ignore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract document": {
+      "main": [
+        [
+          {
+            "node": "Safe to post automatically?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe to post automatically?": {
+      "main": [
+        [
+          {
+            "node": "Append to the ledger",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write the review message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write the review message": {
+      "main": [
+        [
+          {
+            "node": "Post to the review channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Extract document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "pinData": {}
+}

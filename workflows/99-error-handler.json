@@ -1,0 +1,153 @@
+{
+  "name": "99 Error handler (shared)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e9000000-0000-4000-8000-000000000001",
+      "name": "Something failed",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        0
+      ],
+      "notes": "Set as the Error Workflow on every other workflow. One graph catches all of them."
+    },
+    {
+      "parameters": {
+        "jsCode": "// One readable sentence, not a stack trace.\n//\n// An alert that takes effort to read gets muted, and a muted alert is worse than\n// no alert, because it looks like coverage. So this answers the three questions\n// someone actually has at 7am: what broke, where, and is it still broken.\n\nconst out = [];\n\nfor (const item of $input.all()) {\n  const e = item.json;\n  const wf = e.workflow?.name ?? 'unknown workflow';\n  const node = e.execution?.lastNodeExecuted ?? 'unknown node';\n  const msg = e.execution?.error?.message ?? e.trigger?.error?.message ?? 'no message';\n  const url = e.execution?.url ?? '';\n  const when = e.execution?.error?.timestamp ?? new Date().toISOString();\n\n  // Anything with a token or key in it must not be forwarded into a Slack channel\n  // that is usually wider than the people who should see credentials.\n  const safe = String(msg)\n    .replace(/(Bearer\\s+)[A-Za-z0-9._\\-]+/gi, '$1[redacted]')\n    .replace(/((?:api[_-]?key|token|secret|password)[\"'\\s:=]+)[^\\s\"',}]+/gi, '$1[redacted]')\n    .slice(0, 800);\n\n  out.push({\n    json: {\n      text: [\n        `:rotating_light: *${wf}* failed`,\n        `Stopped at: *${node}*`,\n        `Error: ${safe}`,\n        url ? `<${url}|Open the failed run>` : `(self-hosted: check Executions)`,\n        `Time: ${when}`,\n      ].join('\\n'),\n      workflow: wf,\n      node,\n      error: safe,\n    },\n  });\n}\n\nreturn out;"
+      },
+      "id": "e9000000-0000-4000-8000-000000000002",
+      "name": "Make it readable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        0
+      ],
+      "notes": "Redacts anything key-shaped. An alert channel is wider than a credentials list."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.slack_webhook_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "e9000000-0000-4000-8000-000000000003",
+      "name": "Tell someone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "notes": "continueRegularOutput on purpose: if Slack is down the alert must still try email."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Settings').first().json.alert_email }}",
+        "subject": "={{ $json.workflow }} failed at {{ $json.node }}",
+        "emailType": "text",
+        "message": "={{ $json.error }}",
+        "options": {}
+      },
+      "id": "e9000000-0000-4000-8000-000000000004",
+      "name": "And email, in case Slack is the thing that broke",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set0",
+              "name": "slack_webhook_url",
+              "value": "https://hooks.slack.com/services/REPLACE_ME",
+              "type": "string"
+            },
+            {
+              "id": "set1",
+              "name": "alert_email",
+              "value": "you@example.com",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "includeBinary": true,
+        "options": {}
+      },
+      "id": "e9000000-0000-4000-8000-000000000005",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        200
+      ],
+      "notes": "Every URL the workflow uses, in one place a non-technical person can edit. Env vars are not used on purpose: n8n blocks $env in nodes by default and n8n cloud will not let you unblock it, so an $env expression fails on import."
+    }
+  ],
+  "connections": {
+    "Something failed": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make it readable": {
+      "main": [
+        [
+          {
+            "node": "Tell someone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tell someone": {
+      "main": [
+        [
+          {
+            "node": "And email, in case Slack is the thing that broke",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Make it readable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
